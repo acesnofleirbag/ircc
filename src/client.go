@@ -10,18 +10,18 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 )
 
 const (
-	MessageType__PrivMsg = iota
-	MessageType__None
+	Msgtype__privmsg = iota
+	Msgtype__none
 )
 
 type Message struct {
-	_type int
-
-	Username string
-	Data     string
+	Timestamp time.Time
+	Username  string
+	Data      string
 }
 
 type Client struct {
@@ -29,10 +29,11 @@ type Client struct {
 	port     int
 	address  string
 	nickname string
-	server   string
-	chat     Message
+	server   []string
+	chat     []Message
 	stream   net.Conn
 	reader   *textproto.Reader
+	Iface    UI
 }
 
 func NewClient(addr string, port int, nickname string) Client {
@@ -40,17 +41,14 @@ func NewClient(addr string, port int, nickname string) Client {
 		address:  addr,
 		port:     port,
 		nickname: nickname,
+		Iface:    NewScreen(),
 	}
 }
 
-func (self *Client) parseMessage(msg string) Message {
+func (self *Client) parsemsg(msg string) Message {
 	var chat Message
 
-	if strings.Contains(msg, "PRIVMSG") {
-		chat._type = MessageType__PrivMsg
-	} else {
-		chat._type = MessageType__None
-	}
+	chat.Timestamp = time.Now()
 
 	index := strings.Index(msg, " :")
 
@@ -60,11 +58,13 @@ func (self *Client) parseMessage(msg string) Message {
 		chat.Data = msg
 	}
 
-	if chat._type == MessageType__PrivMsg {
+	if strings.Contains(msg, "PRIVMSG") {
 		index = strings.Index(msg, "!")
 
 		username := msg[:index]
 		chat.Username = username[1:]
+	} else {
+		chat.Username = "INFO"
 	}
 
 	return chat
@@ -88,24 +88,27 @@ func (self *Client) SendPrivMsg(msg string) {
 	self.Send(self.stream, fmt.Sprintf("PRIVMSG #%v :%v", self.server, msg))
 }
 
-func (self *Client) Compute() Message {
+func (self *Client) Compute() {
 	for !self.exit {
 		data, err := self.reader.ReadLine()
 		guard.Err(err)
 
 		self.Pong(data)
 
-		msg := self.parseMessage(data)
-		fmt.Printf("%v: %v\n", msg.Username, msg.Data)
+		msg := self.parsemsg(data)
 
-		self.chat = msg
+		if strings.Compare(msg.Username, "INFO") == 0 {
+			self.Iface.AddLine(fmt.Sprintf("[%v] %v: %v\n", msg.Timestamp.Format("15:04"), msg.Username, msg.Data))
+		} else {
+			self.Iface.AddLine(fmt.Sprintf("[%v] @%v: %v\n", msg.Timestamp.Format("15:04"), msg.Username, msg.Data))
+		}
+
+		self.chat = append(self.chat, msg)
 	}
-
-	return Message{}
 }
 
-func (self *Client) Authenticate(password string) {
-	self.Send(self.stream, fmt.Sprintf("PASS oauth:%v", password))
+func (self *Client) Authenticate(passwd string) {
+	self.Send(self.stream, fmt.Sprintf("PASS %v", passwd))
 	self.Send(self.stream, fmt.Sprintf("NICK %v", self.nickname))
 }
 
@@ -122,7 +125,7 @@ func (self *Client) Pong(msg string) {
 
 func (self *Client) Join(server string) {
 	self.Send(self.stream, fmt.Sprintf("JOIN #%v", server))
-	self.server = server
+	self.server = append(self.server, server)
 
 	reader := bufio.NewReader(self.stream)
 	textProto := textproto.NewReader(reader)
@@ -147,5 +150,7 @@ func (self *Client) Disconnect() {
 func (self *Client) Run(config *Config) {
 	self.Connect(config)
 	self.Join(config.Server)
-	self.Compute()
+	go self.Compute()
+
+	self.Iface.Run()
 }
