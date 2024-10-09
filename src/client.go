@@ -24,6 +24,11 @@ type Message struct {
 	Data      string
 }
 
+const (
+	Mode__normal = iota
+	Mode__insert
+)
+
 type Client struct {
 	exit     bool
 	port     int
@@ -33,7 +38,7 @@ type Client struct {
 	chat     []Message
 	stream   net.Conn
 	reader   *textproto.Reader
-	Iface    UI
+	Mode     int
 }
 
 func NewClient(addr string, port int, nickname string) Client {
@@ -41,7 +46,6 @@ func NewClient(addr string, port int, nickname string) Client {
 		address:  addr,
 		port:     port,
 		nickname: nickname,
-		Iface:    NewScreen(),
 	}
 }
 
@@ -98,9 +102,9 @@ func (self *Client) Compute() {
 		msg := self.parsemsg(data)
 
 		if strings.Compare(msg.Username, "INFO") == 0 {
-			self.Iface.AddLine(fmt.Sprintf("[%v] %v: %v\n", msg.Timestamp.Format("15:04"), msg.Username, msg.Data))
+			IFACE.AddLine(fmt.Sprintf("[%v] %v: %v\n", msg.Timestamp.Format("15:04"), msg.Username, msg.Data))
 		} else {
-			self.Iface.AddLine(fmt.Sprintf("[%v] @%v: %v\n", msg.Timestamp.Format("15:04"), msg.Username, msg.Data))
+			IFACE.AddLine(fmt.Sprintf("[%v] @%v: %v\n", msg.Timestamp.Format("15:04"), msg.Username, msg.Data))
 		}
 
 		self.chat = append(self.chat, msg)
@@ -151,6 +155,15 @@ func (self *Client) Run(config *Config) {
 	self.Connect(config)
 	self.Join(config.Server)
 	go self.Compute()
+}
 
-	self.Iface.Run()
+func (self *Client) AddMessage(data string) {
+	msg := Message{
+		Timestamp: time.Now(),
+		Username:  self.nickname,
+		Data:      data,
+	}
+
+	self.chat = append(self.chat, msg)
+	IFACE.AddLine(fmt.Sprintf("[%v] @%v: %v\n", msg.Timestamp.Format("15:04"), msg.Username, msg.Data))
 }

@@ -8,6 +8,9 @@ import (
 	"os"
 )
 
+var CLIENT Client
+var IFACE UI
+
 type Config struct {
 	Port     int    `json:"port"`
 	Address  string `json:"address"`
@@ -31,6 +34,9 @@ func main() {
 	err = json.Unmarshal(configData, &config)
 	guard.Err(err)
 
-	client := NewClient(config.Address, config.Port, config.Nickname)
-	client.Run(&config)
+	CLIENT = NewClient(config.Address, config.Port, config.Nickname)
+	CLIENT.Run(&config)
+
+	IFACE = NewScreen()
+	IFACE.Run()
 }
