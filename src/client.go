@@ -13,9 +13,11 @@ import (
 	"time"
 )
 
+const MAXCHAT = 1 << 13
+
 const (
-	Msgtype__privmsg = iota
-	Msgtype__none
+	Msgtype__Privmsg = iota
+	Msgtype__None
 )
 
 type Message struct {
@@ -25,8 +27,8 @@ type Message struct {
 }
 
 const (
-	Mode__normal = iota
-	Mode__insert
+	Mode__Normal = iota
+	Mode__Insert
 )
 
 type Client struct {
@@ -38,7 +40,7 @@ type Client struct {
 	chat     []Message
 	stream   net.Conn
 	reader   *textproto.Reader
-	Mode     int
+	mode     int
 }
 
 func NewClient(addr string, port int, nickname string) Client {
@@ -46,6 +48,7 @@ func NewClient(addr string, port int, nickname string) Client {
 		address:  addr,
 		port:     port,
 		nickname: nickname,
+		mode:     Mode__Normal,
 	}
 }
 
@@ -101,13 +104,8 @@ func (self *Client) Compute() {
 
 		msg := self.parsemsg(data)
 
-		if strings.Compare(msg.Username, "INFO") == 0 {
-			IFACE.AddLine(fmt.Sprintf("[%v] %v: %v\n", msg.Timestamp.Format("15:04"), msg.Username, msg.Data))
-		} else {
-			IFACE.AddLine(fmt.Sprintf("[%v] @%v: %v\n", msg.Timestamp.Format("15:04"), msg.Username, msg.Data))
-		}
-
 		self.chat = append(self.chat, msg)
+		IFACE.Rehydrate()
 	}
 }
 
@@ -164,6 +162,17 @@ func (self *Client) AddMessage(data string) {
 		Data:      data,
 	}
 
+	self.Send(self.stream, data)
+
 	self.chat = append(self.chat, msg)
-	IFACE.AddLine(fmt.Sprintf("[%v] @%v: %v\n", msg.Timestamp.Format("15:04"), msg.Username, msg.Data))
+	IFACE.Rehydrate()
+}
+
+func (self *Client) GetMode() string {
+	modes := map[int]string{
+		Mode__Insert: "INSERT",
+		Mode__Normal: "NORMAL",
+	}
+
+	return modes[self.mode]
 }

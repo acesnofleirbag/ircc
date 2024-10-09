@@ -8,8 +8,10 @@ import (
 	"os"
 )
 
-var CLIENT Client
-var IFACE UI
+var (
+	CLIENT Client
+	IFACE  UI
+)
 
 type Config struct {
 	Port     int    `json:"port"`
