@@ -482,7 +482,7 @@ RFC 2812          Internet Relay Chat: Client Protocol        April 2000
 
    a*c         ; Matches any string of at least 2 characters in length
                starting with "a" and ending with "c"
-@@@
+
 3. Message Details
 
    On the following pages there are descriptions of each message
@@ -849,6 +849,7 @@ RFC 2812          Internet Relay Chat: Client Protocol        April 2000
    details are found in "Internet Relay Chat: Channel Management" [IRC-
    CHAN].
 
+@@@
 3.2.1 Join message
 
       Command: JOIN

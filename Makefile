@@ -12,5 +12,5 @@ run: build
 
 .PHONY: fmt
 fmt:
-	go fmt ./src
+	go fmt ./...
 

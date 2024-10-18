@@ -159,7 +159,7 @@ func (self *UI) process() {
 					if strings.HasPrefix(string(self.prompt), ":") {
 						self.Cmd(string(self.prompt[1:]))
 					} else {
-						CLIENT.AddMessage(string(self.prompt))
+						CLIENT.SendMessage(string(self.prompt))
 						self.prompt = self.prompt[:0]
 						self.cursor.x = 0
 					}
@@ -238,6 +238,12 @@ func (self *UI) offsetDown() {
 func (self *UI) Cmd(cmd string) {
 	if strings.Compare(cmd, "q") == 0 || strings.Compare(cmd, "Q") == 0 {
 		self.exit = true
+	} else if strings.HasPrefix(cmd, "!") {
+		CLIENT.ExeBin(cmd[1:])
+	} else if strings.HasPrefix(cmd, "/") {
+		args := strings.Split(cmd, " ")
+
+		CLIENT.ExeCmd(args[0][1:], args[1:]...)
 	} else {
 		CLIENT.mode = Mode__Normal
 		self.prompt = self.prompt[:0]

@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"ircc/src/cmd"
 	"ircc/src/guard"
 	"net"
 	"net/textproto"
@@ -26,8 +27,10 @@ type Message struct {
 	Data      string
 }
 
+type Mode int
+
 const (
-	Mode__Normal = iota
+	Mode__Normal Mode = iota
 	Mode__Insert
 )
 
@@ -40,7 +43,7 @@ type Client struct {
 	chat     []Message
 	stream   net.Conn
 	reader   *textproto.Reader
-	mode     int
+	mode     Mode
 }
 
 func NewClient(addr string, port int, nickname string) Client {
@@ -155,7 +158,7 @@ func (self *Client) Run(config *Config) {
 	go self.Compute()
 }
 
-func (self *Client) AddMessage(data string) {
+func (self *Client) SendMessage(data string) {
 	msg := Message{
 		Timestamp: time.Now(),
 		Username:  self.nickname,
@@ -169,10 +172,47 @@ func (self *Client) AddMessage(data string) {
 }
 
 func (self *Client) GetMode() string {
-	modes := map[int]string{
+	modes := map[Mode]string{
 		Mode__Insert: "INSERT",
 		Mode__Normal: "NORMAL",
 	}
 
 	return modes[self.mode]
+}
+
+// Built-in cmds
+func (self *Client) ExeBin(cmd string) {
+	if strings.Compare(cmd, "list-modes") == 0 {
+		data := []string{
+			"== modes ==",
+			"a - user is flagged as away",
+			"i - marks a users as invisible",
+			"w - user receives wallops",
+			"r - restricted user connection",
+			"o - operator flag",
+			"O - local operator flag",
+			"s - marks a user for receipt of server notices (obsolete)",
+		}
+
+		for _, msg := range data {
+            // FIXME: AddMessage
+			self.SendMessage(msg)
+		}
+	}
+}
+
+func (self *Client) ExeCmd(_cmd string, args ...string) {
+	cmds := map[string]func(args ...string) string{
+		"OPER":    cmd.Oper,
+		"MODE":    cmd.Mode,
+		"SERVICE": cmd.Service,
+		"AWAY":    nil,
+		"QUIT":    cmd.Quit,
+		"SQUIT":   cmd.Squit,
+		"JOIN":    cmd.Join,
+	}
+
+	_cmd = cmds[_cmd](args...)
+
+	self.Send(self.stream, _cmd)
 }

@@ -5,8 +5,7 @@ import (
 )
 
 func Err(err error) {
-    if err != nil {
-        log.Fatalf("%+v", err)
-    }
+	if err != nil {
+		log.Fatalf("%+v", err)
+	}
 }
-
