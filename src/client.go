@@ -2,8 +2,9 @@ package main
 
 import (
 	"bufio"
+	"crypto/tls"
 	"fmt"
-	"ircc/src/cmd"
+	"ircc/src/builtin"
 	"ircc/src/guard"
 	"net"
 	"net/textproto"
@@ -14,7 +15,7 @@ import (
 	"time"
 )
 
-const MAXCHAT = 1 << 13
+const CHATSIZ = 1 << 13
 
 const (
 	Msgtype__Privmsg = iota
@@ -34,58 +35,88 @@ const (
 	Mode__Insert
 )
 
-type Client struct {
-	exit     bool
-	port     int
-	address  string
-	nickname string
-	server   []string
-	chat     []Message
-	stream   net.Conn
-	reader   *textproto.Reader
-	mode     Mode
+type Server struct {
+	name   string
+	chat   []Message
+	reader *textproto.Reader
 }
 
-func NewClient(addr string, port int, nickname string) Client {
+type Client struct {
+	exit       bool
+	port       int
+	address    string
+	nickname   string
+	realname   string
+	server     *Server
+	serverList map[string]*Server
+	stream     net.Conn
+	mode       Mode
+}
+
+func NewClient(addr string, port int, nickname string, realname string) Client {
 	return Client{
-		address:  addr,
-		port:     port,
-		nickname: nickname,
-		mode:     Mode__Normal,
+		address:    addr,
+		port:       port,
+		nickname:   nickname,
+		realname:   realname,
+		mode:       Mode__Normal,
+		serverList: map[string]*Server{},
 	}
+}
+
+func (self *Client) NewServer(name string, reader *textproto.Reader) *Server {
+	return &Server{name: name, reader: reader, chat: []Message{}}
 }
 
 func (self *Client) parsemsg(msg string) Message {
-	var chat Message
+	var data string
+	var username string
 
-	chat.Timestamp = time.Now()
+	ptr0 := strings.Index(msg, " :")
 
-	index := strings.Index(msg, " :")
-
-	if index != -1 {
-		chat.Data = msg[index+2:]
+	if ptr0 != -1 {
+		data = msg[ptr0+2:]
 	} else {
-		chat.Data = msg
+		data = msg
 	}
 
-	if strings.Contains(msg, "PRIVMSG") {
-		index = strings.Index(msg, "!")
+	ptr1 := strings.Index(msg, "PRIVMSG")
+	ptr2 := strings.Index(msg, "!")
 
-		username := msg[:index]
-		chat.Username = username[1:]
+	if ptr1 != -1 && ptr2 != -1 && ptr2 < ptr1 {
+		username := msg[:ptr2]
+		username = username[1:]
 	} else {
-		chat.Username = "INFO"
+		username = "INFO"
 	}
 
-	return chat
+	return Message{
+		Timestamp: time.Now(),
+		Username:  username,
+		Data:      data,
+	}
 }
 
+// Only works with TLS servers
 func (self *Client) Connect(config *Config) {
-	stream, err := net.Dial("tcp", fmt.Sprintf("%v:%v", self.address, self.port))
+	cert, err := tls.LoadX509KeyPair("irc.pem", "irc.pem")
+	guard.Err(err)
+
+	tlsConfig := tls.Config{Certificates: []tls.Certificate{cert}}
+
+	stream, err := tls.Dial("tcp", fmt.Sprintf("%v:%v", self.address, self.port), &tlsConfig)
 	guard.Err(err)
 
 	self.stream = stream
 	self.Authenticate(config.Password)
+
+	reader := bufio.NewReader(self.stream)
+	textProto := textproto.NewReader(reader)
+
+	server := self.NewServer("-", textProto)
+
+	self.server = server
+	self.serverList["-"] = server
 }
 
 func (self *Client) Send(stream net.Conn, msg string) {
@@ -94,20 +125,20 @@ func (self *Client) Send(stream net.Conn, msg string) {
 	guard.Err(err)
 }
 
-func (self *Client) SendPrivMsg(msg string) {
-	self.Send(self.stream, fmt.Sprintf("PRIVMSG #%v :%v", self.server, msg))
+func (self *Client) SendPrivmsg(msg string) {
+	self.Send(self.stream, fmt.Sprintf("PRIVMSG #%v :%v", self.server.name, msg))
 }
 
 func (self *Client) Compute() {
 	for !self.exit {
-		data, err := self.reader.ReadLine()
+		data, err := self.server.reader.ReadLine()
 		guard.Err(err)
 
 		self.Pong(data)
 
 		msg := self.parsemsg(data)
 
-		self.chat = append(self.chat, msg)
+		self.server.chat = append(self.server.chat, msg)
 		IFACE.Rehydrate()
 	}
 }
@@ -115,6 +146,7 @@ func (self *Client) Compute() {
 func (self *Client) Authenticate(passwd string) {
 	self.Send(self.stream, fmt.Sprintf("PASS %v", passwd))
 	self.Send(self.stream, fmt.Sprintf("NICK %v", self.nickname))
+	self.Send(self.stream, fmt.Sprintf("USER %v 0 * :%v", self.nickname, self.realname))
 }
 
 func (self *Client) Pong(msg string) {
@@ -128,14 +160,16 @@ func (self *Client) Pong(msg string) {
 	}
 }
 
-func (self *Client) Join(server string) {
-	self.Send(self.stream, fmt.Sprintf("JOIN #%v", server))
-	self.server = append(self.server, server)
+func (self *Client) Join(serverName string) {
+	self.Send(self.stream, fmt.Sprintf("JOIN #%v", serverName))
 
 	reader := bufio.NewReader(self.stream)
 	textProto := textproto.NewReader(reader)
 
-	self.reader = textProto
+	server := self.NewServer(serverName, textProto)
+
+	self.server = server
+	self.serverList[serverName] = server
 }
 
 func (self *Client) Disconnect() {
@@ -154,7 +188,6 @@ func (self *Client) Disconnect() {
 
 func (self *Client) Run(config *Config) {
 	self.Connect(config)
-	self.Join(config.Server)
 	go self.Compute()
 }
 
@@ -165,9 +198,10 @@ func (self *Client) SendMessage(data string) {
 		Data:      data,
 	}
 
-	self.Send(self.stream, data)
+	self.SendPrivmsg(data)
 
-	self.chat = append(self.chat, msg)
+	self.server.chat = append(self.server.chat, msg)
+
 	IFACE.Rehydrate()
 }
 
@@ -180,39 +214,51 @@ func (self *Client) GetMode() string {
 	return modes[self.mode]
 }
 
-// Built-in cmds
-func (self *Client) ExeBin(cmd string) {
-	if strings.Compare(cmd, "list-modes") == 0 {
-		data := []string{
-			"== modes ==",
-			"a - user is flagged as away",
-			"i - marks a users as invisible",
-			"w - user receives wallops",
-			"r - restricted user connection",
-			"o - operator flag",
-			"O - local operator flag",
-			"s - marks a user for receipt of server notices (obsolete)",
-		}
-
-		for _, msg := range data {
-            // FIXME: AddMessage
-			self.SendMessage(msg)
-		}
-	}
+func (self *Client) GetChat() *[]Message {
+	return &self.server.chat
 }
 
-func (self *Client) ExeCmd(_cmd string, args ...string) {
-	cmds := map[string]func(args ...string) string{
-		"OPER":    cmd.Oper,
-		"MODE":    cmd.Mode,
-		"SERVICE": cmd.Service,
-		"AWAY":    nil,
-		"QUIT":    cmd.Quit,
-		"SQUIT":   cmd.Squit,
-		"JOIN":    cmd.Join,
+func (self *Client) ChangeServer(args ...string) []string {
+	if len(args) < 1 {
+		return []string{"Missing server parameter, could not change the server"}
 	}
 
-	_cmd = cmds[_cmd](args...)
+	server := args[0]
 
-	self.Send(self.stream, _cmd)
+	if _, ok := self.serverList[server]; ok {
+		self.server = self.serverList[server]
+		return []string{fmt.Sprintf("You are currently on server: %s", server)}
+	}
+
+	return []string{fmt.Sprintf("Could not change to server: %s", server)}
+}
+
+func (self *Client) ExeBin(cmd string, args ...string) {
+	bin := map[string]func(args ...string) []string{
+		"help":       builtin.Help,
+		"list-flags": builtin.ListFlags,
+		"change":     self.ChangeServer,
+	}
+
+	res := bin[cmd](args...)
+
+	for _, line := range res {
+		msg := Message{
+			Timestamp: time.Now(),
+			Username:  "INFO",
+			Data:      line,
+		}
+
+		self.server.chat = append(self.server.chat, msg)
+	}
+
+	IFACE.Rehydrate()
+}
+
+func (self *Client) ExeCmd(cmd string) {
+	if !strings.HasPrefix(cmd, "JOIN") {
+		self.Send(self.stream, cmd)
+	} else {
+		self.Join(cmd[5:])
+	}
 }

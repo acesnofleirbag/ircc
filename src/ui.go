@@ -62,16 +62,16 @@ func (self *UI) Run() {
 }
 
 func (self *UI) Rehydrate() {
-	chat := CLIENT.chat
+	chat := CLIENT.GetChat()
 	S := self.screen
 
 	S.Clear()
 
-	if len(chat) > self.cursor.y && !self.hold {
-		self.cursor.offset = len(chat) - self.cursor.y
+	if len(*chat) > self.cursor.y && !self.hold {
+		self.cursor.offset = len(*chat) - self.cursor.y
 	}
 
-	for line, msg := range chat {
+	for line, msg := range *chat {
 		var data string
 
 		if line < self.cursor.offset {
@@ -153,7 +153,11 @@ func (self *UI) process() {
 			} else if CLIENT.mode == Mode__Insert {
 				switch event.Key() {
 				case tcell.KeyEscape:
-					CLIENT.mode = Mode__Normal
+					if CLIENT.mode == Mode__Insert {
+						CLIENT.mode = Mode__Normal
+						self.prompt = self.prompt[:0]
+						self.cursor.x = 0
+					}
 					break
 				case tcell.KeyEnter:
 					if strings.HasPrefix(string(self.prompt), ":") {
@@ -198,26 +202,32 @@ func (self *UI) displayPrompt() {
 	S := self.screen
 
 	maxx, _ := S.Size()
+	srvlen := len(CLIENT.server.name) + 1
 	mode := CLIENT.GetMode()
 	promptlen := len(self.prompt)
-	gap := maxx - promptlen - len(mode)
+	gap := maxx - srvlen - promptlen - len(mode)
+
+	// render current server
+	for i, ch := range CLIENT.server.name {
+		S.SetContent(i, self.cursor.y, ch, nil, tcell.StyleDefault)
+	}
 
 	// render prompt
 	for i, ch := range self.prompt {
-		S.SetContent(i, self.cursor.y, ch, nil, tcell.StyleDefault)
+		S.SetContent(i+srvlen, self.cursor.y, ch, nil, tcell.StyleDefault)
 	}
 
 	// render gap
 	for i := 0; i < gap; i++ {
-		S.SetContent(promptlen+i, self.cursor.y, ' ', nil, tcell.StyleDefault)
+		S.SetContent(srvlen+promptlen+i, self.cursor.y, ' ', nil, tcell.StyleDefault)
 	}
 
 	// render mode
 	for i, ch := range mode {
-		S.SetContent(promptlen+gap+i, self.cursor.y, ch, nil, tcell.StyleDefault)
+		S.SetContent(srvlen+promptlen+gap+i, self.cursor.y, ch, nil, tcell.StyleDefault)
 	}
 
-	S.ShowCursor(self.cursor.x, self.cursor.y)
+	S.ShowCursor(self.cursor.x+srvlen, self.cursor.y)
 }
 
 func (self *UI) offsetUp() {
@@ -228,9 +238,11 @@ func (self *UI) offsetUp() {
 }
 
 func (self *UI) offsetDown() {
-	if len(CLIENT.chat) == self.cursor.offset+self.cursor.y {
+	chat := CLIENT.GetChat()
+
+	if len(*chat) == self.cursor.offset+self.cursor.y {
 		self.hold = false
-	} else if len(CLIENT.chat) > self.cursor.offset+self.cursor.y {
+	} else if len(*chat) > self.cursor.offset+self.cursor.y {
 		self.cursor.offset += 1
 	}
 }
@@ -239,14 +251,14 @@ func (self *UI) Cmd(cmd string) {
 	if strings.Compare(cmd, "q") == 0 || strings.Compare(cmd, "Q") == 0 {
 		self.exit = true
 	} else if strings.HasPrefix(cmd, "!") {
-		CLIENT.ExeBin(cmd[1:])
-	} else if strings.HasPrefix(cmd, "/") {
 		args := strings.Split(cmd, " ")
 
-		CLIENT.ExeCmd(args[0][1:], args[1:]...)
-	} else {
-		CLIENT.mode = Mode__Normal
-		self.prompt = self.prompt[:0]
-		self.cursor.x = 0
+		CLIENT.ExeBin(args[0][1:], strings.Join(args[1:], ""))
+	} else if strings.HasPrefix(cmd, "/") {
+		CLIENT.ExeCmd(cmd[1:])
 	}
+
+	CLIENT.mode = Mode__Normal
+	self.prompt = self.prompt[:0]
+	self.cursor.x = 0
 }

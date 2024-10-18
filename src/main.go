@@ -19,6 +19,7 @@ type Config struct {
 	Server   string `json:"server"`
 	Nickname string `json:"nickname"`
 	Password string `json:"password"`
+	Realname string `json:"realname"`
 }
 
 func main() {
@@ -36,7 +37,7 @@ func main() {
 	err = json.Unmarshal(configData, &config)
 	guard.Err(err)
 
-	CLIENT = NewClient(config.Address, config.Port, config.Nickname)
+	CLIENT = NewClient(config.Address, config.Port, config.Nickname, config.Realname)
 	CLIENT.Run(&config)
 
 	IFACE = NewScreen()
